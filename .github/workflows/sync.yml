@@ -1,0 +1,26 @@
+name: autosynctogitee
+on:
+  workflow_dispatch:
+  push:
+jobs:
+  run:
+    name: sync
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v1
+    - name: Mirror Github to Gitee
+      uses: Yikun/hub-mirror-action@master
+      with:
+        # 支持Gitee, Github and Gitlab
+        src: github/minlearn
+        # 支持Gitee, Github and Gitlab
+        dst: gitee/minlearn
+        dst_key: ${{ secrets.GITEE_KEY }}
+        dst_token: ${{ secrets.GITEE_TOKEN }}
+        # 支持Github/Gitee的用户、组织以及Gitlab的组
+        # 支持分别设置源和目的端的类型
+        # src_account_type: org
+        # dst_account_type: org
+        static_list: "inst"
+        force_update: true
