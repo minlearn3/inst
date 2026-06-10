@@ -8,11 +8,11 @@ echo -e "deb ${debmirror} bullseye main\ndeb ${debmirror} bullseye-updates main\
 
 echo "Installing Dependencies"
 silent apt-get update -y
-silent apt-get install -y curl sudo mc gnupg2
+silent apt-get install -y curl sudo mc gnupg2 procps
 echo "Installed Dependencies"
 
-silent apt-get install -y curl git procps postgresql-client libpq-dev
-silent apt-get install -y build-essential autoconf bison libssl-dev libyaml-dev \
+silent apt-get install -y postgresql-client nginx redis
+silent apt-get install -y git build-essential autoconf bison libpq-dev libssl-dev libyaml-dev \
   libreadline-dev zlib1g-dev libncurses5-dev libffi-dev libgdbm-dev libgmp-dev \
   libdb-dev libsqlite3-dev sqlite3
 
@@ -23,7 +23,7 @@ silent apt-get update -y
 silent apt-get install nodejs yarn -y
 gpg --keyserver hkp://keyserver.ubuntu.com --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3 7D2BAF1CF37B13E2069D6956105BD0E739499BDB
 gpg2 --keyserver hkp://keyserver.ubuntu.com --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3 7D2BAF1CF37B13E2069D6956105BD0E739499BDB
-bash -lc 'curl -sSL https://get.rvm.io | bash -s stable'
+curl -sSL https://get.rvm.io | bash -s stable
 [ -f /etc/profile.d/rvm.sh ] && source /etc/profile.d/rvm.sh || source "$HOME/.rvm/scripts/rvm"
 rvm autolibs disable
 rvm install "ruby-3.1.3"
@@ -50,28 +50,51 @@ EOL
 cat > /root/start.sh << 'EOL'
 cd /root/chatwoot
 
+# https://github.com/chatwoot/chatwoot/blob/master/deployment/nginx_chatwoot.conf
+tee /root/chatwoot/config/nginx.default.tpl > /dev/null << 'EOF'
+upstream app_backend {
+    server localhost:3000;
+}
+
+server {
+    listen 80 default_server;
+    server_name _;
+    client_max_body_size 25m;
+    root /root/chatwoot/public;
+
+    location / {
+        proxy_pass http://app_backend/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        #所有动态页面：强制不缓存、透传 Cookie
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "-1";
+    }
+}
+EOF
+
 # https://github.com/chatwoot/chatwoot/blob/master/deployment/setup_20.04.sh
 if [ ! -f /root/inited ]; then
   secret=$(cat /root/chatwoot/secret.tmp)
   RAILS_ENV=production
-  pg_pass="chatwoot"
-  read -p "give a dbip(127.0.0.1,10.10.10.x,etc..):" ip
-  read -p "give a dbpassword:" pw
-  read -p "give a redis server ip:" rip
+  read -p "give a postgresql host ip(127.0.0.1,10.10.10.x,etc..):" ip
+  read -p "give a postgresql admin password:" pw
+  read -p "give a chatwoot user dbpassword:" cpw
 
   cp .env.example .env
   sed -i "/SECRET_KEY_BASE/ s/=.*/=${secret}/" .env
-  sed -i "/REDIS_URL/ s/=.*/=redis:\/\/${rip}:6379/" .env
+  sed -i "/REDIS_URL/ s/=.*/=redis:\/\/localhost:6379/" .env
   sed -i "/POSTGRES_HOST/ s/=.*/=${ip}/" .env
   sed -i "/POSTGRES_USERNAME/ s/=.*/=chatwoot/" .env
-  sed -i "/POSTGRES_PASSWORD/ s/=.*/=${pg_pass}/" .env
+  sed -i "/POSTGRES_PASSWORD/ s/=.*/=${cpw}/" .env
   sed -i "/RAILS_ENV/ s/=.*/=${RAILS_ENV}/" .env
   echo -en "\nINSTALLATION_ENV=linux_script" >> ".env"
 
   PGPASSWORD="$pw" psql -h $ip -p 5432 -U postgres << EOF
-    \set pass `echo $pg_pass`
     CREATE USER chatwoot CREATEDB;
-    ALTER USER chatwoot PASSWORD :'pass';
+    ALTER USER chatwoot PASSWORD '$cpw';
     ALTER ROLE chatwoot SUPERUSER;
     UPDATE pg_database SET datistemplate = FALSE WHERE datname = 'template1';
     DROP DATABASE template1;
@@ -80,14 +103,61 @@ if [ ! -f /root/inited ]; then
     \c template1
     VACUUM FREEZE;
 EOF
+
+  bundle exec rails db:chatwoot_prepare RAILS_ENV=production
+
+  # https://github.com/chatwoot/chatwoot/blob/master/deployment/chatwoot-worker.service
+  tee /etc/systemd/system/chatwoot-worker.service > /dev/null << 'EOF'
+[Unit]
+Description=Chatwoot Worker Server
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=root
+WorkingDirectory=/root/chatwoot
+Environment="RAILS_ENV=production"
+Environment="GEM_HOME=/usr/local/rvm/gems/ruby-3.1.3/gems"
+Environment="GEM_PATH=/usr/local/rvm/gems/ruby-3.1.3/gems:/usr/local/rvm/rubies/ruby-3.1.3/lib/ruby/gems/3.1.0/gems"
+ExecStart=/usr/local/rvm/rubies/ruby-3.1.3/bin/ruby bin/bundle exec sidekiq -C config/sidekiq.yml
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  # https://github.com/chatwoot/chatwoot/blob/master/deployment/chatwoot-web.service
+  tee /etc/systemd/system/chatwoot-web.service > /dev/null << 'EOF'
+[Unit]
+Description=Chatwoot Web Server
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=root
+WorkingDirectory=/root/chatwoot
+Environment="RAILS_ENV=production"
+Environment="GEM_HOME=/usr/local/rvm/gems/ruby-3.1.3/gems"
+Environment="GEM_PATH=/usr/local/rvm/gems/ruby-3.1.3/gems:/usr/local/rvm/rubies/ruby-3.1.3/lib/ruby/gems/3.1.0/gems"
+ExecStart=/usr/local/rvm/rubies/ruby-3.1.3/bin/ruby bin/rails server -p 3000 -e production
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl start redis
+  systemctl enable -q --now chatwoot-worker
+  systemctl enable -q --now chatwoot-web
+
+  chmod -R 755 /root/chatwoot
+  sed -i "s/user www-data;/user root;/g" /etc/nginx/nginx.conf
+  cp /root/chatwoot/config/nginx.default.tpl /etc/nginx/sites-enabled/default
+  systemctl restart nginx
+
   touch /root/inited
 fi
 
-# https://github.com/chatwoot/chatwoot/blob/master/deployment/chatwoot-web.1.service
-bin/rails server -p 3000 -e production
-bundle exec rails db:chatwoot_prepare RAILS_ENV=production
-# https://github.com/chatwoot/chatwoot/blob/master/deployment/chatwoot-worker.1.service
-RAILS_ENV=production bundle exec sidekiq -C config/sidekiq.yml
 EOL
 
 echo "Cleaning up"

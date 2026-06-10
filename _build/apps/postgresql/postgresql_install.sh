@@ -144,6 +144,8 @@ if [[ "${prompt,,}" =~ ^(y|yes)$ ]]; then
   silent apt install -y adminer
   a2enconf adminer
   systemctl reload apache2
+  # apache2 is started temply atm
+  systemctl enable apache2
   echo "Installed Adminer"
 fi
 
