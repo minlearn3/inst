@@ -16,7 +16,7 @@ silent apt-get install -y git build-essential autoconf bison libpq-dev libssl-de
   libreadline-dev zlib1g-dev libncurses5-dev libffi-dev libgdbm-dev libgmp-dev \
   libdb-dev libsqlite3-dev sqlite3
 
-curl -sL https://deb.nodesource.com/setup_16.x | bash -
+curl -sL https://deb.nodesource.com/setup_20.x | bash -
 curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
 echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
 silent apt-get update -y
@@ -24,6 +24,7 @@ silent apt-get install nodejs yarn -y
 gpg --keyserver hkp://keyserver.ubuntu.com --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3 7D2BAF1CF37B13E2069D6956105BD0E739499BDB
 gpg2 --keyserver hkp://keyserver.ubuntu.com --recv-keys 409B6B1796C275462A1703113804BB82D39DC0E3 7D2BAF1CF37B13E2069D6956105BD0E739499BDB
 curl -sSL https://get.rvm.io | bash -s stable
+# source using in this script dont actually apply env to current session, need reboot
 [ -f /etc/profile.d/rvm.sh ] && source /etc/profile.d/rvm.sh || source "$HOME/.rvm/scripts/rvm"
 rvm autolibs disable
 rvm install "ruby-3.1.3"
@@ -37,13 +38,16 @@ git checkout b1ec67d11020ac52b74fa96af9803abdaa521509
 cat > /root/compile.sh << 'EOL'
 cd /root/chatwoot
 
+# fix: 让source脚本对current session立刻生效, so avoid reboot
+[ -f /etc/profile.d/rvm.sh ] && source /etc/profile.d/rvm.sh || source "$HOME/.rvm/scripts/rvm"
 [[ ! -f /usr/bin/mkdir ]] && ln -s /bin/mkdir /usr/bin/mkdir
 bundle
 sed -i '/"@chatwoot\/prosemirror-schema":/c\    "@chatwoot/prosemirror-schema": "https://github.com/chatwoot/prosemirror-schema.git#1735b80",' package.json
 yarn
 secret=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 63 ; echo '')
 echo $secret > secret.tmp
-export NODE_OPTIONS="--max-old-space-size=2048"
+export NODE_ENV="production"
+export NODE_OPTIONS="--max-old-space-size=2048 --openssl-legacy-provider"
 SECRET_KEY_BASE=$secret bundle exec rake assets:precompile RAILS_ENV=production
 EOL
 
@@ -119,9 +123,8 @@ RestartSec=10
 User=root
 WorkingDirectory=/root/chatwoot
 Environment="RAILS_ENV=production"
-Environment="GEM_HOME=/usr/local/rvm/gems/ruby-3.1.3/gems"
-Environment="GEM_PATH=/usr/local/rvm/gems/ruby-3.1.3/gems:/usr/local/rvm/rubies/ruby-3.1.3/lib/ruby/gems/3.1.0/gems"
-ExecStart=/usr/local/rvm/rubies/ruby-3.1.3/bin/ruby bin/bundle exec sidekiq -C config/sidekiq.yml
+#用/bin/bash套起来从主机自动获取环变和路径，否则systemd默认得不到ruby需要的大量环境变量和路径需要手动喂
+ExecStart=/bin/bash -lc 'bin/bundle exec sidekiq -C config/sidekiq.yml'
 
 [Install]
 WantedBy=multi-user.target
@@ -139,9 +142,8 @@ RestartSec=10
 User=root
 WorkingDirectory=/root/chatwoot
 Environment="RAILS_ENV=production"
-Environment="GEM_HOME=/usr/local/rvm/gems/ruby-3.1.3/gems"
-Environment="GEM_PATH=/usr/local/rvm/gems/ruby-3.1.3/gems:/usr/local/rvm/rubies/ruby-3.1.3/lib/ruby/gems/3.1.0/gems"
-ExecStart=/usr/local/rvm/rubies/ruby-3.1.3/bin/ruby bin/rails server -p 3000 -e production
+#用/bin/bash套起来从主机自动获取环变和路径，否则systemd默认得不到ruby需要的大量环境变量和路径需要手动喂
+ExecStart=/bin/bash -lc 'bin/rails server -p 3000'
 
 [Install]
 WantedBy=multi-user.target
