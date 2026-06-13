@@ -16,7 +16,7 @@ silent apt-get install -y git build-essential autoconf bison libpq-dev libssl-de
   libreadline-dev zlib1g-dev libncurses5-dev libffi-dev libgdbm-dev libgmp-dev \
   libdb-dev libsqlite3-dev sqlite3
 
-curl -sL https://deb.nodesource.com/setup_20.x | bash -
+curl -sL https://deb.nodesource.com/setup_16.x | bash -
 curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | apt-key add -
 echo "deb https://dl.yarnpkg.com/debian/ stable main" | tee /etc/apt/sources.list.d/yarn.list
 silent apt-get update -y
@@ -41,13 +41,14 @@ cd /root/chatwoot
 # fix: 让source脚本对current session立刻生效, so avoid reboot
 [ -f /etc/profile.d/rvm.sh ] && source /etc/profile.d/rvm.sh || source "$HOME/.rvm/scripts/rvm"
 [[ ! -f /usr/bin/mkdir ]] && ln -s /bin/mkdir /usr/bin/mkdir
+sed -i 's/sassc (2.4.0)/sassc (2.1.0)/' Gemfile.lock
 bundle
-sed -i '/"@chatwoot\/prosemirror-schema":/c\    "@chatwoot/prosemirror-schema": "https://github.com/chatwoot/prosemirror-schema.git#1735b80",' package.json
+sed -i '/"@chatwoot\/prosemirror-schema":/c\    "@chatwoot/prosemirror-schema": "https://github.com/chatwoot/prosemirror-schema.git#58fe432",' package.json
+sed -e 's/variable-mention/58fe432/g' -e 's/2205f322e54517c415d54b013742838f2e5faf89/58fe4323c3c62c78df5150fca19fa169c9a9e881/g' -i yarn.lock
 yarn
 secret=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 63 ; echo '')
 echo $secret > secret.tmp
-export NODE_ENV="production"
-export NODE_OPTIONS="--max-old-space-size=2048 --openssl-legacy-provider"
+#export NODE_ENV="production"
 SECRET_KEY_BASE=$secret bundle exec rake assets:precompile RAILS_ENV=production
 EOL
 
