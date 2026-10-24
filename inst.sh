@@ -2696,7 +2696,7 @@ mkdir -p $remasteringdir/boot # $remasteringdir/boot/grub/i386-pc $remasteringdi
   var_version="11"
 
   NSAPP=$(echo ${APP,,} | tr -d ' ') # This function sets the NSAPP variable by converting the value of the APP variable to lowercase and removing any spaces.
-  REPO=${REPOMIRROR}/_build/apps
+  REPO=${RLSMIRROR/inst/instapps/}/_build/pveapps
   
   [[ "$tmpTARGETMODE" == '10' && "$tmpTARGET" != '' ]] && url_check "${REPO}/${APP}/${APP}_install.sh"
 
